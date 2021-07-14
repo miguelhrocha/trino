@@ -78,10 +78,10 @@ import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_JOIN_PUSHDOWN_W
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_LIMIT_PUSHDOWN;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_EQUALITY;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_ROW_LEVEL_DELETE;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_TOPN_PUSHDOWN;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_TOPN_PUSHDOWN_WITH_VARCHAR;
 import static io.trino.testing.assertions.Assert.assertEventually;
-import static io.trino.testing.sql.TestTable.randomTableSuffix;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.concurrent.Executors.newCachedThreadPool;
@@ -1169,24 +1169,23 @@ public abstract class BaseJdbcConnectorTest
     @Test
     public void testDeleteWithBigintEqualityPredicate()
     {
-        skipTestUnlessSupportsDeletes();
-        String tableName = "test_delete_" + randomTableSuffix();
-        assertUpdate("CREATE TABLE " + tableName + " AS SELECT * FROM region", 5);
-        assertUpdate("DELETE FROM " + tableName + " WHERE regionkey = 1", 1);
-        assertQuery(
-                "SELECT regionkey, name FROM " + tableName,
-                "VALUES "
-                        + "(0, 'AFRICA'),"
-                        + "(2, 'ASIA'),"
-                        + "(3, 'EUROPE'),"
-                        + "(4, 'MIDDLE EAST')");
-        assertUpdate("DROP TABLE " + tableName);
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete", "AS SELECT * FROM region")) {
+            assertUpdate("DELETE FROM " + table.getName() + " WHERE regionkey = 1", 1);
+            assertQuery(
+                    "SELECT regionkey, name FROM " + table.getName(),
+                    "VALUES "
+                            + "(0, 'AFRICA'),"
+                            + "(2, 'ASIA'),"
+                            + "(3, 'EUROPE'),"
+                            + "(4, 'MIDDLE EAST')");
+        }
     }
 
     @Test
     public void testDeleteWithVarcharEqualityPredicate()
     {
-        skipTestUnlessSupportsDeletes();
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
         try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete", "(col varchar(1))", ImmutableList.of("'a'", "'A'", "null"))) {
             if (!hasBehavior(SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_EQUALITY)) {
                 assertQueryFails("DELETE FROM " + table.getName() + " WHERE col = 'A'", "Unsupported delete");
@@ -1201,7 +1200,7 @@ public abstract class BaseJdbcConnectorTest
     @Test
     public void testDeleteWithVarcharInequalityPredicate()
     {
-        skipTestUnlessSupportsDeletes();
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
         try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete", "(col varchar(1))", ImmutableList.of("'a'", "'A'", "null"))) {
             if (!hasBehavior(SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY)) {
                 assertQueryFails("DELETE FROM " + table.getName() + " WHERE col != 'A'", "Unsupported delete");
@@ -1216,7 +1215,7 @@ public abstract class BaseJdbcConnectorTest
     @Test
     public void testDeleteWithVarcharGreaterAndLowerPredicate()
     {
-        skipTestUnlessSupportsDeletes();
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
         try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete", "(col varchar(1))", ImmutableList.of("'0'", "'a'", "'A'", "'b'", "null"))) {
             if (!hasBehavior(SUPPORTS_PREDICATE_PUSHDOWN_WITH_VARCHAR_INEQUALITY)) {
                 assertQueryFails("DELETE FROM " + table.getName() + " WHERE col < 'A'", "Unsupported delete");
@@ -1234,7 +1233,7 @@ public abstract class BaseJdbcConnectorTest
     @Override
     public void testDeleteWithComplexPredicate()
     {
-        skipTestUnlessSupportsDeletes();
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
         assertThatThrownBy(super::testDeleteWithComplexPredicate)
                 .hasStackTraceContaining("TrinoException: Unsupported delete");
     }
@@ -1242,7 +1241,7 @@ public abstract class BaseJdbcConnectorTest
     @Override
     public void testDeleteWithSubquery()
     {
-        skipTestUnlessSupportsDeletes();
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
         assertThatThrownBy(super::testDeleteWithSubquery)
                 .hasStackTraceContaining("TrinoException: Unsupported delete");
     }
@@ -1250,7 +1249,7 @@ public abstract class BaseJdbcConnectorTest
     @Override
     public void testDeleteWithSemiJoin()
     {
-        skipTestUnlessSupportsDeletes();
+        skipTestUnless(hasBehavior(SUPPORTS_CREATE_TABLE) && hasBehavior(SUPPORTS_ROW_LEVEL_DELETE));
         assertThatThrownBy(super::testDeleteWithSemiJoin)
                 .hasStackTraceContaining("TrinoException: Unsupported delete");
     }
@@ -1259,6 +1258,26 @@ public abstract class BaseJdbcConnectorTest
     public void testDeleteWithVarcharPredicate()
     {
         throw new SkipException("This is implemented by testDeleteWithVarcharEqualityPredicate");
+    }
+
+    @Test
+    public void testInsertWithoutTemporaryTable()
+    {
+        if (!hasBehavior(SUPPORTS_CREATE_TABLE)) {
+            throw new SkipException("CREATE TABLE is required for testing non-transactional write support");
+        }
+        Session session = Session.builder(getSession())
+                .setCatalogSessionProperty(getSession().getCatalog().orElseThrow(), "non_transactional_insert", "false")
+                .build();
+
+        try (TestTable table = new TestTable(
+                getQueryRunner()::execute,
+                "test_bypass_temp",
+                "(a varchar(36), b bigint)")) {
+            String values = String.join(",", buildRowsForInsert(5000));
+            assertUpdate(session, "INSERT INTO " + table.getName() + " (a, b) VALUES " + values, 5000);
+            assertQuery("SELECT COUNT(*) FROM " + table.getName(), format("VALUES %d", 5000));
+        }
     }
 
     @Test(dataProvider = "batchSizeAndTotalNumberOfRowsToInsertDataProvider")
@@ -1275,13 +1294,13 @@ public abstract class BaseJdbcConnectorTest
                 getQueryRunner()::execute,
                 "test_insert_batch_size",
                 "(a varchar(36), b bigint)")) {
-            String values = String.join(",", makeValuesForInsertBatchSizeSessionPropertyTest(numberOfRows));
+            String values = String.join(",", buildRowsForInsert(numberOfRows));
             assertUpdate(session, "INSERT INTO " + table.getName() + " (a, b) VALUES " + values, numberOfRows);
             assertQuery("SELECT COUNT(*) FROM " + table.getName(), format("VALUES %d", numberOfRows));
         }
     }
 
-    private static List<String> makeValuesForInsertBatchSizeSessionPropertyTest(int numberOfRows)
+    private static List<String> buildRowsForInsert(int numberOfRows)
     {
         List<String> result = new ArrayList<>(numberOfRows);
         for (int i = 0; i < numberOfRows; i++) {
