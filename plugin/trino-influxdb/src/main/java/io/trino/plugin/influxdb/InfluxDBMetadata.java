@@ -1,5 +1,6 @@
 package io.trino.plugin.influxdb;
 
+import com.google.common.collect.ImmutableList;
 import io.trino.spi.connector.ConnectorMetadata;
 import io.trino.spi.connector.ConnectorSession;
 
@@ -17,6 +18,6 @@ public class InfluxDBMetadata implements ConnectorMetadata
     @Override
     public List<String> listSchemaNames(ConnectorSession session)
     {
-        return ConnectorMetadata.super.listSchemaNames(session);
+        return ImmutableList.copyOf(influxDBClient.getSchemaNames());
     }
 }
