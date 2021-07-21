@@ -11,7 +11,6 @@ import okhttp3.OkHttpClient;
 import javax.inject.Inject;
 
 import java.time.Duration;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
 
@@ -36,17 +35,22 @@ public class InfluxDBClient
                 .build();
 
         this.tableCache = CacheBuilder.newBuilder()
-            .expireAfterWrite(Duration.ofHours(1))
-            .refreshAfterWrite(Duration.ofMinutes(1))
-            .build(CacheLoader.from(this::loadTableSchema));
+                .expireAfterWrite(Duration.ofHours(1))
+                .refreshAfterWrite(Duration.ofMinutes(1))
+                .build(CacheLoader.from(this::loadTableSchema));
     }
 
-
-    private InfluxDBTable loadTableSchema(final SchemaTableName schemaTableName) {
+    private InfluxDBTable loadTableSchema(final SchemaTableName schemaTableName)
+    {
         return null;
     }
 
     public Set<String> getSchemaNames()
+    {
+        return Collections.emptySet();
+    }
+
+    public Set<String> getTableNames()
     {
         return Collections.emptySet();
     }

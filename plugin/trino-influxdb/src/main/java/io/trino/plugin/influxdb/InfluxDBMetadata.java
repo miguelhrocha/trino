@@ -6,12 +6,14 @@ import io.trino.spi.connector.ConnectorSession;
 
 import java.util.List;
 
-public class InfluxDBMetadata implements ConnectorMetadata
+public class InfluxDBMetadata
+        implements ConnectorMetadata
 {
 
     private final InfluxDBClient influxDBClient;
 
-    public InfluxDBMetadata(final InfluxDBClient influxDBClient) {
+    public InfluxDBMetadata(final InfluxDBClient influxDBClient)
+    {
         this.influxDBClient = influxDBClient;
     }
 

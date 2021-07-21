@@ -7,6 +7,8 @@ import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.VarcharType;
 
+import java.util.Optional;
+
 import static java.util.Objects.requireNonNull;
 
 public enum InfluxDBType
@@ -28,6 +30,5 @@ public enum InfluxDBType
     {
         return trinoType;
     }
-
 
 }

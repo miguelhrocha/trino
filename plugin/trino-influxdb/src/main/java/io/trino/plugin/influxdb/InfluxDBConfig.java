@@ -11,6 +11,7 @@ public class InfluxDBConfig
 {
     private String host;
     private int port = 8086;
+    private float version;
     private Duration metadataCacheTtl = Duration.ofMillis(1000);
     private String database;
     private String username;
@@ -42,6 +43,18 @@ public class InfluxDBConfig
     public InfluxDBConfig setPort(int port)
     {
         this.port = port;
+        return this;
+    }
+
+    public float getVersion()
+    {
+        return version;
+    }
+
+    @Config("influxdb.version")
+    public InfluxDBConfig setVersion(float version)
+    {
+        this.version = version;
         return this;
     }
 
