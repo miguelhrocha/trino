@@ -93,14 +93,14 @@ import static org.testng.Assert.assertNotEquals;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 
-public abstract class AbstractTestIcebergConnectorTest
+public abstract class BaseIcebergConnectorTest
         extends BaseConnectorTest
 {
     private static final Pattern WITH_CLAUSE_EXTRACTER = Pattern.compile(".*(WITH\\s*\\([^)]*\\))\\s*$", Pattern.DOTALL);
 
     private final FileFormat format;
 
-    protected AbstractTestIcebergConnectorTest(FileFormat format)
+    protected BaseIcebergConnectorTest(FileFormat format)
     {
         this.format = requireNonNull(format, "format is null");
     }
@@ -120,6 +120,9 @@ public abstract class AbstractTestIcebergConnectorTest
             case SUPPORTS_RENAME_TABLE:
             case SUPPORTS_TOPN_PUSHDOWN:
                 return false;
+
+            case SUPPORTS_CREATE_VIEW:
+                return true;
 
             case SUPPORTS_CREATE_MATERIALIZED_VIEW:
                 return true;
@@ -191,6 +194,7 @@ public abstract class AbstractTestIcebergConnectorTest
     }
 
     @Test
+    @Override
     public void testShowCreateSchema()
     {
         assertThat(computeActual("SHOW CREATE SCHEMA tpch").getOnlyValue().toString())
@@ -784,7 +788,13 @@ public abstract class AbstractTestIcebergConnectorTest
 
         assertQuery("SELECT d_hour, row_count, d.min, d.max, b.min, b.max FROM \"test_hour_transform$partitions\"", expected);
 
-        System.out.println(computeActual("SELECT * FROM \"test_hour_transform$files\""));
+        assertThat(query("SHOW STATS FOR test_hour_transform"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, " + (format == ORC ? "NULL, NULL" : "'1969-12-31 22:22:22.222222', '2020-02-21 13:12:12.654321'") + "), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '11'), " +
+                        "  (NULL, NULL, NULL, 11e0, NULL, NULL)");
 
         dropTable("test_hour_transform");
     }
@@ -821,6 +831,14 @@ public abstract class AbstractTestIcebergConnectorTest
                         "(DATE '2015-05-15', 2, DATE '2015-05-15', DATE '2015-05-15', 6, 7), " +
                         "(DATE '2020-02-21', 2, DATE '2020-02-21', DATE '2020-02-21', 8, 9)");
 
+        assertThat(query("SHOW STATS FOR test_day_transform_date"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, '1969-01-01', '2020-02-21'), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '11'), " +
+                        "  (NULL, NULL, NULL, 11e0, NULL, NULL)");
+
         dropTable("test_day_transform_date");
     }
 
@@ -854,6 +872,7 @@ public abstract class AbstractTestIcebergConnectorTest
                 "(DATE '2015-05-15', 2, TIMESTAMP '2015-05-15 13:05:01.234567', TIMESTAMP '2015-05-15 14:21:02.345678', 4, 5), " +
                 "(DATE '2020-02-21', 2, TIMESTAMP '2020-02-21 15:11:11.876543', TIMESTAMP '2020-02-21 16:12:12.654321', 6, 7)";
         if (format == ORC) {
+            // Parquet has min/max for timestamps but ORC does not.
             expected = "VALUES " +
                     "(DATE '1969-12-25', 1, NULL, NULL, 8, 8), " +
                     "(DATE '1969-12-30', 1, NULL, NULL, 9, 9), " +
@@ -865,6 +884,14 @@ public abstract class AbstractTestIcebergConnectorTest
         }
 
         assertQuery("SELECT d_day, row_count, d.min, d.max, b.min, b.max FROM \"test_day_transform_timestamp$partitions\"", expected);
+
+        assertThat(query("SHOW STATS FOR test_day_transform_timestamp"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, " + (format == ORC ? "NULL, NULL" : "'1969-12-25 15:13:12.876543', '2020-02-21 16:12:12.654321'") + "), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '12'), " +
+                        "  (NULL, NULL, NULL, 12e0, NULL, NULL)");
 
         dropTable("test_day_transform_timestamp");
     }
@@ -904,6 +931,14 @@ public abstract class AbstractTestIcebergConnectorTest
                         "(605, 3, DATE '2020-06-06', DATE '2020-06-28', 9, 11), " +
                         "(606, 2, DATE '2020-07-18', DATE '2020-07-28', 12, 13), " +
                         "(611, 1, DATE '2020-12-31', DATE '2020-12-31', 14, 14)");
+
+        assertThat(query("SHOW STATS FOR test_month_transform_date"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, '1969-11-13', '2020-12-31'), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '14'), " +
+                        "  (NULL, NULL, NULL, 14e0, NULL, NULL)");
 
         dropTable("test_month_transform_date");
     }
@@ -948,6 +983,14 @@ public abstract class AbstractTestIcebergConnectorTest
 
         assertQuery("SELECT d_month, row_count, d.min, d.max, b.min, b.max FROM \"test_month_transform_timestamp$partitions\"", expected);
 
+        assertThat(query("SHOW STATS FOR test_month_transform_timestamp"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, " + (format == ORC ? "NULL, NULL" : "'1969-11-15 15:13:12.876543', '2020-02-21 16:12:12.654321'") + "), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '12'), " +
+                        "  (NULL, NULL, NULL, 12e0, NULL, NULL)");
+
         dropTable("test_month_transform_timestamp");
     }
 
@@ -981,6 +1024,14 @@ public abstract class AbstractTestIcebergConnectorTest
                         "(45, 3, DATE '2015-01-01', DATE '2015-07-28', 6, 8), " +
                         "(46, 2, DATE '2016-05-15', DATE '2016-06-06', 9, 10), " +
                         "(50, 2, DATE '2020-02-21', DATE '2020-11-10', 11, 12)");
+
+        assertThat(query("SHOW STATS FOR test_year_transform_date"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, '1968-10-13', '2020-11-10'), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '12'), " +
+                        "  (NULL, NULL, NULL, 12e0, NULL, NULL)");
 
         dropTable("test_year_transform_date");
     }
@@ -1023,6 +1074,14 @@ public abstract class AbstractTestIcebergConnectorTest
 
         assertQuery("SELECT d_year, row_count, d.min, d.max, b.min, b.max FROM \"test_year_transform_timestamp$partitions\"", expected);
 
+        assertThat(query("SHOW STATS FOR test_year_transform_timestamp"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, " + (format == ORC ? "NULL, NULL" : "'1968-03-15 15:13:12.876543', '2020-08-21 16:12:12.654321'") + "), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '12'), " +
+                        "  (NULL, NULL, NULL, 12e0, NULL, NULL)");
+
         dropTable("test_year_transform_timestamp");
     }
 
@@ -1051,6 +1110,14 @@ public abstract class AbstractTestIcebergConnectorTest
 
         assertQuery("SELECT b FROM test_truncate_text_transform WHERE substring(d, 1, 2) = 'Gr'", "VALUES 6, 7");
         assertQuery(select + " WHERE d_trunc = 'Gr'", "VALUES ('Gr', 2, 'Greece', 'Grozny', 6, 7)");
+
+        assertThat(query("SHOW STATS FOR test_truncate_text_transform"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, NULL, NULL), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '7'), " +
+                        "  (NULL, NULL, NULL, 7e0, NULL, NULL)");
 
         dropTable("test_truncate_text_transform");
     }
@@ -1099,6 +1166,14 @@ public abstract class AbstractTestIcebergConnectorTest
         assertQuery("SELECT b FROM " + table + " WHERE d IN (-123, -130)", "VALUES 14, 15");
         assertQuery(select + " WHERE d_trunc = -130", "VALUES (-130, 2, -130, -123, 14, 15)");
 
+        assertThat(query("SHOW STATS FOR " + table))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, '-130', '123'), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '15'), " +
+                        "  (NULL, NULL, NULL, 15e0, NULL, NULL)");
+
         dropTable(table);
     }
 
@@ -1138,6 +1213,14 @@ public abstract class AbstractTestIcebergConnectorTest
         assertQuery("SELECT b FROM test_truncate_decimal_transform WHERE d = -0.05", "VALUES 5");
         assertQuery(select + " WHERE d_trunc = -0.10", "VALUES (-0.10, 1, -0.05, -0.05, 5, 5)");
 
+        assertThat(query("SHOW STATS FOR test_truncate_decimal_transform"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, '-0.05', '12.34'), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '5'), " +
+                        "  (NULL, NULL, NULL, 5e0, NULL, NULL)");
+
         dropTable("test_truncate_decimal_transform");
     }
 
@@ -1162,6 +1245,14 @@ public abstract class AbstractTestIcebergConnectorTest
         assertQuery(select + " WHERE d_bucket = 0", "VALUES(0, 3, 'Grozny', 'mommy', 1, 7)");
 
         assertQuery(select + " WHERE d_bucket = 1", "VALUES(1, 4, 'Greece', 'moscow', 2, 6)");
+
+        assertThat(query("SHOW STATS FOR test_bucket_transform"))
+                .projected(0, 2, 3, 4, 5, 6) // ignore data size which is available for Parquet, but not for ORC
+                .skippingTypesCheck()
+                .matches("VALUES " +
+                        "  ('d', NULL, 0e0, NULL, NULL, NULL), " +
+                        "  ('b', NULL, 0e0, NULL, '1', '7'), " +
+                        "  (NULL, NULL, NULL, 7e0, NULL, NULL)");
 
         dropTable("test_bucket_transform");
     }

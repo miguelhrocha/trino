@@ -14,17 +14,24 @@
 package io.trino.testing;
 
 import io.trino.Session;
+import io.trino.cost.StatsAndCosts;
+import io.trino.metadata.Metadata;
 import io.trino.sql.analyzer.FeaturesConfig.JoinDistributionType;
+import io.trino.sql.planner.Plan;
+import io.trino.sql.planner.plan.LimitNode;
 import io.trino.testing.sql.TestTable;
 import org.intellij.lang.annotations.Language;
 import org.testng.SkipException;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static io.trino.SystemSessionProperties.IGNORE_STATS_CALCULATOR_FAILURES;
 import static io.trino.spi.type.VarcharType.VARCHAR;
+import static io.trino.sql.planner.optimizations.PlanNodeSearcher.searchFrom;
+import static io.trino.sql.planner.planprinter.PlanPrinter.textLogicalPlan;
 import static io.trino.testing.DataProviders.toDataProvider;
 import static io.trino.testing.QueryAssertions.assertContains;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_ARRAY;
@@ -42,6 +49,7 @@ import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_ROW_LEVEL_DELET
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_TOPN_PUSHDOWN;
 import static io.trino.testing.assertions.Assert.assertEquals;
 import static io.trino.testing.sql.TestTable.randomTableSuffix;
+import static java.lang.String.format;
 import static java.lang.String.join;
 import static java.util.Collections.nCopies;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -529,6 +537,37 @@ public abstract class BaseConnectorTest
         assertUpdate("DROP MATERIALIZED VIEW " + viewNameWithComment);
     }
 
+    @Test
+    public void testViewAndMaterializedViewTogether()
+    {
+        if (!hasBehavior(SUPPORTS_CREATE_MATERIALIZED_VIEW) || !hasBehavior(SUPPORTS_CREATE_VIEW)) {
+            return;
+        }
+        // Validate that it is possible to have views and materialized views defined at the same time and both are operational
+
+        String schemaName = getSession().getSchema().orElseThrow();
+
+        String regularViewName = "test_views_together_normal_" + randomTableSuffix();
+        assertUpdate("CREATE VIEW " + regularViewName + " AS SELECT * FROM region");
+
+        String materializedViewName = "test_views_together_materialized_" + randomTableSuffix();
+        assertUpdate("CREATE MATERIALIZED VIEW " + materializedViewName + " AS SELECT * FROM nation");
+
+        // both should be accessible via information_schema.views
+        // TODO: actually it is not the cased now hence overridable `checkInformationSchemaViewsForMaterializedView`
+        assertThat(query("SELECT table_name FROM information_schema.views WHERE table_schema = '" + schemaName + "'"))
+                .skippingTypesCheck()
+                .containsAll("VALUES '" + regularViewName + "'");
+        checkInformationSchemaViewsForMaterializedView(schemaName, materializedViewName);
+
+        // check we can query from both
+        assertThat(query("SELECT * FROM " + regularViewName)).containsAll("SELECT * FROM region");
+        assertThat(query("SELECT * FROM " + materializedViewName)).containsAll("SELECT * FROM nation");
+
+        assertUpdate("DROP VIEW " + regularViewName);
+        assertUpdate("DROP MATERIALIZED VIEW " + materializedViewName);
+    }
+
     // TODO inline when all implementations fixed
     protected void checkInformationSchemaViewsForMaterializedView(String schemaName, String viewName)
     {
@@ -775,5 +814,24 @@ public abstract class BaseConnectorTest
             assertUpdate("DELETE FROM " + table.getName() + " WHERE regionkey = 2", 1);
             assertQuery("SELECT count(*) FROM " + table.getName(), "VALUES 4");
         }
+    }
+
+    protected Consumer<Plan> assertPartialLimitWithPreSortedInputsCount(Session session, int expectedCount)
+    {
+        return plan -> {
+            int actualCount = searchFrom(plan.getRoot())
+                    .where(node -> node instanceof LimitNode && ((LimitNode) node).isPartial() && ((LimitNode) node).requiresPreSortedInputs())
+                    .findAll()
+                    .size();
+            if (actualCount != expectedCount) {
+                Metadata metadata = getDistributedQueryRunner().getCoordinator().getMetadata();
+                String formattedPlan = textLogicalPlan(plan.getRoot(), plan.getTypes(), metadata, StatsAndCosts.empty(), session, 0, false);
+                throw new AssertionError(format(
+                        "Expected [\n%s\n] partial limit but found [\n%s\n] partial limit. Actual plan is [\n\n%s\n]",
+                        expectedCount,
+                        actualCount,
+                        formattedPlan));
+            }
+        };
     }
 }
